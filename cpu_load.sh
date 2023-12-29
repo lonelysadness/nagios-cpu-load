@@ -100,7 +100,7 @@ calculate_average() {
     awk -v start=$start_time -v end=$end_time '$1 >= start && $1 <= end { total += $2; count++ } END { if (count > 0) print total/count; else print 0; }' "$DATA_FILE"
 }
 
-# Checks thresholds
+# Checks thresholds and returns message with status
 check_thresholds() {
     local avg_load=$1
     local warn_threshold=$2
@@ -108,14 +108,11 @@ check_thresholds() {
     local period=$4
 
     if (( $(echo "$avg_load >= $crit_threshold" | /usr/bin/bc -l) )); then
-        echo "CRITICAL: Average CPU load over $period minute(s) is $avg_load%, CRITICAL Threshold: $crit_threshold%"
-        return $CRITICAL
+        echo "$CRITICAL:CRITICAL: Average CPU load over $period minute(s) is $avg_load%, CRITICAL Threshold: $crit_threshold%"
     elif (( $(echo "$avg_load >= $warn_threshold" | /usr/bin/bc -l) )); then
-        echo "WARNING: Average CPU load over $period minute(s) is $avg_load%, WARNING Threshold: $warn_threshold%"
-        return $WARNING
+        echo "$WARNING:WARNING: Average CPU load over $period minute(s) is $avg_load%, WARNING Threshold: $warn_threshold%"
     else
-        echo "OK: Average CPU load over $period minute(s) is $avg_load%, All is normal"
-        return $OK
+        echo "$OK:OK: Average CPU load over $period minute(s) is $avg_load%, All is normal"
     fi
 }
 
@@ -129,16 +126,46 @@ periods=("1" "5" "15")
 warn_thresholds=($WARN_1_MIN $WARN_5_MIN $WARN_15_MIN)
 crit_thresholds=($CRIT_1_MIN $CRIT_5_MIN $CRIT_15_MIN)
 
-highest_status=$OK
+# Arrays to hold status messages
+declare -a critical_messages
+declare -a warning_messages
+declare -a ok_messages
 
 for i in "${!periods[@]}"; do
     avg_load=$(calculate_average ${periods[$i]})
-    check_thresholds $avg_load ${warn_thresholds[$i]} ${crit_thresholds[$i]} ${periods[$i]}
-    status=$?
-    if [ $status -gt $highest_status ]; then
-        highest_status=$status
-    fi
+    result=$(check_thresholds $avg_load ${warn_thresholds[$i]} ${crit_thresholds[$i]} ${periods[$i]})
+    status_code=$(echo $result | cut -d: -f1)
+    message=$(echo $result | cut -d: -f2-)
+
+    case $status_code in
+        $CRITICAL)
+            critical_messages+=("$message")
+            ;;
+        $WARNING)
+            warning_messages+=("$message")
+            ;;
+        $OK)
+            ok_messages+=("$message")
+            ;;
+    esac
 done
 
-exit $highest_status
+# Print the messages in the order of CRITICAL, WARNING, OK
+for msg in "${critical_messages[@]}"; do
+    echo $msg
+done
 
+for msg in "${warning_messages[@]}"; do
+    echo $msg
+done
+
+for msg in "${ok_messages[@]}"; do
+    echo $msg
+done
+
+# Determine the highest status for exit code
+highest_status=$OK
+[[ ${#critical_messages[@]} -gt 0 ]] && highest_status=$CRITICAL
+[[ ${#critical_messages[@]} -eq 0 && ${#warning_messages[@]} -gt 0 ]] && highest_status=$WARNING
+
+exit $highest_status
