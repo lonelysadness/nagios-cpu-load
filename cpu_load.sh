@@ -1,36 +1,88 @@
 #!/bin/bash
 
-# Location of the data file
-DATA_FILE="XXXX"
+# Default settings
+DATA_FILE="/var/tmp/cpu_load_data"
 MAX_LINES=1440 # To store up to 24 hours of data
-
-# Check if iostat is accessible
-if ! command -v /usr/bin/iostat &> /dev/null
-then
-    echo "UNKNOWN: iostat not found"
-    exit 3
-fi
-
-# Check if the data file is writable
-if ! touch "$DATA_FILE" &> /dev/null
-then
-    echo "UNKNOWN: Unable to write to $DATA_FILE"
-    exit 3
-fi
-
-# Default threshold values
-WARN_1_MIN=70
-CRIT_1_MIN=90
-WARN_5_MIN=60
-CRIT_5_MIN=80
-WARN_15_MIN=50
-CRIT_15_MIN=70
 
 # Nagios exit codes
 OK=0
 WARNING=1
 CRITICAL=2
 UNKNOWN=3
+
+# Display help
+display_help() {
+    echo "Usage: $0 [options]"
+    echo "Options:"
+    echo "  -h, --help           Show this help message"
+    echo "  -f, --data-file      Specify the data file path (default: $DATA_FILE)"
+    echo "  -t, --thresholds     Set thresholds in format '1:warn,crit-5:warn,crit-15:warn,crit'"
+    echo "                       Example: -t 1:70,90-5:60,80-15:50,70"
+}
+
+# Parse thresholds
+parse_thresholds() {
+    IFS='-' read -ra ADDR <<< "$1"
+    for i in "${ADDR[@]}"; do
+        IFS=':' read time values <<< "$i"
+        IFS=',' read warn crit <<< "$values"
+        case $time in
+            1) WARN_1_MIN=$warn; CRIT_1_MIN=$crit ;;
+            5) WARN_5_MIN=$warn; CRIT_5_MIN=$crit ;;
+            15) WARN_15_MIN=$warn; CRIT_15_MIN=$crit ;;
+        esac
+    done
+}
+
+# Parse arguments
+parse_arguments() {
+    DATA_FILE=$DATA_FILE
+    WARN_1_MIN=70; CRIT_1_MIN=90
+    WARN_5_MIN=60; CRIT_5_MIN=80
+    WARN_15_MIN=50; CRIT_15_MIN=70
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                display_help
+                exit 0
+                ;;
+            -f|--data-file)
+                DATA_FILE=$2
+                shift 2
+                ;;
+            -t|--thresholds)
+                parse_thresholds $2
+                shift 2
+                ;;
+            *)
+                echo "Unknown option: $1"
+                display_help
+                exit $UNKNOWN
+                ;;
+        esac
+    done
+}
+
+# Check if iostat is accessible
+if ! command -v iostat &> /dev/null; then
+    echo "UNKNOWN: iostat not found"
+    exit $UNKNOWN
+fi
+
+# Check and prepare the data file
+if [[ ! -f "$DATA_FILE" ]]; then
+    if ! touch "$DATA_FILE" &> /dev/null; then
+        echo "UNKNOWN: Unable to create $DATA_FILE"
+        exit $UNKNOWN
+    fi
+    chmod 600 "$DATA_FILE" &> /dev/null
+fi
+
+if ! [ -w "$DATA_FILE" ]; then
+    echo "UNKNOWN: Unable to write to $DATA_FILE"
+    exit $UNKNOWN
+fi
 
 # Collects and stores CPU load
 collect_cpu_load() {
@@ -67,6 +119,8 @@ check_thresholds() {
     fi
 }
 
+parse_arguments "$@"
+
 # Collects CPU load
 collect_cpu_load
 
@@ -87,3 +141,4 @@ for i in "${!periods[@]}"; do
 done
 
 exit $highest_status
+
