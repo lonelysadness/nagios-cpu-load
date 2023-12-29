@@ -126,10 +126,11 @@ periods=("1" "5" "15")
 warn_thresholds=($WARN_1_MIN $WARN_5_MIN $WARN_15_MIN)
 crit_thresholds=($CRIT_1_MIN $CRIT_5_MIN $CRIT_15_MIN)
 
-# Arrays to hold status messages
-declare -a critical_messages
-declare -a warning_messages
-declare -a ok_messages
+# Arrays to hold status messages and performance data
+declare -a status_messages
+declare -a performance_data
+
+highest_status=$OK
 
 for i in "${!periods[@]}"; do
     avg_load=$(calculate_average ${periods[$i]})
@@ -137,35 +138,29 @@ for i in "${!periods[@]}"; do
     status_code=$(echo $result | cut -d: -f1)
     message=$(echo $result | cut -d: -f2-)
 
-    case $status_code in
-        $CRITICAL)
-            critical_messages+=("$message")
-            ;;
-        $WARNING)
-            warning_messages+=("$message")
-            ;;
-        $OK)
-            ok_messages+=("$message")
-            ;;
-    esac
+    status_messages[$status_code]="${status_messages[$status_code]}$message\n"
+    performance_data+=("cpu_load_${periods[$i]}min=$avg_load%;${warn_thresholds[$i]};${crit_thresholds[$i]};0;100")
+
+    if [ $status_code -gt $highest_status ]; then
+        highest_status=$status_code
+    fi
 done
 
-# Print the messages in the order of CRITICAL, WARNING, OK
-for msg in "${critical_messages[@]}"; do
-    echo $msg
+# Prepare the final output
+final_output=""
+
+# Add the status messages to final output
+for status_code in $(echo ${!status_messages[@]} | tr ' ' '\n' | sort -nr); do
+    final_output+="${status_messages[$status_code]}"
 done
 
-for msg in "${warning_messages[@]}"; do
-    echo $msg
+# Add performance data to final output
+final_output+="|"
+for perf in "${performance_data[@]}"; do
+    final_output+="$perf "
 done
 
-for msg in "${ok_messages[@]}"; do
-    echo $msg
-done
-
-# Determine the highest status for exit code
-highest_status=$OK
-[[ ${#critical_messages[@]} -gt 0 ]] && highest_status=$CRITICAL
-[[ ${#critical_messages[@]} -eq 0 && ${#warning_messages[@]} -gt 0 ]] && highest_status=$WARNING
+# Print the final output
+echo -e "$final_output"
 
 exit $highest_status
