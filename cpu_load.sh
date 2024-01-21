@@ -64,9 +64,9 @@ parse_arguments() {
     done
 }
 
-# Check if iostat is accessible
-if ! command -v iostat &> /dev/null; then
-    echo "UNKNOWN: iostat not found"
+# Check if mpstat is accessible
+if ! command -v mpstat &> /dev/null; then
+    echo "UNKNOWN: mpstat not found"
     exit $UNKNOWN
 fi
 
@@ -86,8 +86,8 @@ fi
 
 # Collects and stores CPU load
 collect_cpu_load() {
-    local cpu_load=$(/usr/bin/iostat -c 1 2 | awk '/^avg-cpu:/{i++}i==2{getline; print $1; exit}')
-    echo "$(date +%s) $cpu_load" >> "$DATA_FILE"
+    local cpu_usage=$(mpstat 5 11 | awk '/Average:/ {print 100 - $NF}')
+    echo "$(date +%s) $cpu_usage" >> "$DATA_FILE"
     tail -n $MAX_LINES "$DATA_FILE" > "${DATA_FILE}.tmp"
     mv "${DATA_FILE}.tmp" "$DATA_FILE"
 }
